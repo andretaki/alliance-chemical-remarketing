@@ -1,0 +1,27 @@
+{
+  "name": "alliance-chemical-remarketing",
+  "version": "1.0.0",
+  "description": "AWS Lambda remarketing system with Microsoft Graph API email delivery",
+  "main": "webhook-handler-graph.js",
+  "scripts": {
+    "deploy": "./deploy-graph.sh",
+    "test-webhook": "curl -X POST $WEBHOOK_URL -H 'Content-Type: application/json' -d '{\"email\":\"test@example.com\",\"total_price\":\"1500.00\",\"id\":\"test-cart-123\"}'"
+  },
+  "keywords": [
+    "remarketing",
+    "shopify",
+    "microsoft-graph",
+    "aws-lambda",
+    "cart-abandonment"
+  ],
+  "author": "Alliance Chemical",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "pg": "^8.11.0",
+    "@azure/msal-node": "^2.5.1",
+    "axios": "^1.6.0"
+  }
+}
