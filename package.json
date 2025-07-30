@@ -22,6 +22,7 @@
   "dependencies": {
     "pg": "^8.11.0",
     "@azure/msal-node": "^2.5.1",
-    "axios": "^1.6.0"
+    "axios": "^1.6.0",
+    "openai": "^4.0.0"
   }
 }

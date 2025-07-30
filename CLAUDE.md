@@ -4,16 +4,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an Alliance Chemical remarketing system that captures abandoned Shopify carts and sends professional recovery emails using Microsoft Graph API. The system is deployed as an AWS Lambda function with API Gateway webhook endpoint.
+This is an Alliance Chemical remarketing system that captures abandoned Shopify carts and sends professional recovery emails using Microsoft Graph API. The system includes:
+
+1. **Real-time webhook handler** - Processes Shopify cart abandonment webhooks immediately
+2. **Scheduled cart checker** - Runs every 2 hours to find and recover missed abandoned carts with AI-generated emails
 
 ## Core Architecture
 
-**Single-file Lambda Handler**: `webhook-handler-graph.js` contains the complete webhook processing logic
+**Webhook Handler**: `webhook-handler-graph.js` processes real-time cart abandonments
 - Receives Shopify cart abandonment webhooks via API Gateway
 - Implements anti-fraud fingerprinting using SHA-256 hash of address + email domain + phone
 - Processes tier-based cart values (LOW ≤$1k, MEDIUM $1k-10k, HIGH >$10k)
 - Sends HTML emails via Microsoft Graph API with automatic sales CC
 - Logs all activity to PostgreSQL database
+
+**Scheduled Cart Checker**: `scheduled-cart-checker.js` runs every 2 hours
+- Queries database for abandoned carts not yet emailed or needing follow-up
+- Uses OpenAI GPT-4 to generate personalized email content with cart details
+- Creates unique Shopify discount codes via Admin API
+- Sends recovery emails through Microsoft Graph with sales team CC
+- Tracks all email activity in database to prevent duplicates
 
 **Email Integration**: Uses Microsoft Graph API instead of traditional email services
 - Authenticates using Azure App Registration with client credentials flow
@@ -28,7 +38,7 @@ This is an Alliance Chemical remarketing system that captures abandoned Shopify 
 
 ## Essential Commands
 
-### Deploy the System
+### Deploy the Webhook Handler
 ```bash
 # Set required environment variables
 export AZURE_CLIENT_ID="your_app_registration_id"
@@ -36,8 +46,19 @@ export AZURE_CLIENT_SECRET="your_client_secret"
 export AZURE_TENANT_ID="your_tenant_id"
 export DATABASE_URL="your_postgres_connection_string"
 
-# Deploy to AWS Lambda
+# Deploy webhook handler
 ./deploy-graph.sh
+```
+
+### Deploy the Scheduled Cart Checker
+```bash
+# Set required environment variables (same as above plus OpenAI)
+export OPENAI_API_KEY="your_openai_api_key"
+export SHOPIFY_ACCESS_TOKEN="your_shopify_admin_api_token"  # Optional
+export SHOPIFY_SHOP_DOMAIN="alliance-chemical-store.myshopify.com"
+
+# Deploy scheduled Lambda
+./deploy-scheduled.sh
 ```
 
 ### Test the Webhook
@@ -56,11 +77,17 @@ curl -X POST https://[api-id].execute-api.us-east-2.amazonaws.com/prod/webhook/c
 
 ### Monitor System
 ```bash
-# View Lambda logs
+# View webhook handler logs
 aws logs tail /aws/lambda/alliance-remarketing-graph --follow --region us-east-2
+
+# View scheduled cart checker logs
+aws logs tail /aws/lambda/alliance-scheduled-cart-checker --follow --region us-east-2
 
 # Check API Gateway status
 aws apigatewayv2 get-apis --region us-east-2 --query 'Items[?Name==`alliance-remarketing-graph-api`]'
+
+# Test scheduled cart checker manually
+aws lambda invoke --function-name alliance-scheduled-cart-checker --region us-east-2 output.json
 ```
 
 ## Key Business Logic
@@ -91,20 +118,72 @@ aws apigatewayv2 get-apis --region us-east-2 --query 'Items[?Name==`alliance-rem
 **Required API Permissions**:
 - Microsoft Graph `Mail.Send` application permission with admin consent
 
+**AI Integration (Scheduled Checker)**:
+- OPENAI_API_KEY: OpenAI API key for GPT-4 email generation
+
+**Optional Shopify Integration**:
+- SHOPIFY_ACCESS_TOKEN: Admin API token for creating discount codes
+- SHOPIFY_SHOP_DOMAIN: Your Shopify store domain
+
 **Database Connection**:
 - DATABASE_URL: PostgreSQL connection string with SSL required
 - Uses Neon.tech hosted PostgreSQL service
 
 ## Deployment Architecture
 
-**AWS Lambda Function**: `alliance-remarketing-graph`
-- Runtime: Node.js 18.x
-- Memory: 256MB, Timeout: 30 seconds
-- IAM Role: Basic execution permissions only (no SES/SNS needed)
+**AWS Lambda Functions**:
+1. `alliance-remarketing-graph` - Webhook handler
+   - Runtime: Node.js 18.x
+   - Memory: 256MB, Timeout: 30 seconds
+   - Triggered by API Gateway webhook calls
+
+2. `alliance-scheduled-cart-checker` - Scheduled task
+   - Runtime: Node.js 18.x
+   - Memory: 256MB, Timeout: 60 seconds
+   - Triggered by EventBridge rule every 2 hours
 
 **API Gateway**: HTTP API with single POST route
 - Path: `/webhook/cart/abandoned`
 - Configured for Shopify webhook format
 - CORS enabled for cross-origin requests
 
-The system is designed for high deliverability using Microsoft's email infrastructure rather than traditional email services, providing enterprise-grade reliability with zero spam risk.
+**EventBridge Rule**: Scheduled execution
+- Rule: `alliance-scheduled-cart-checker-rule`
+- Schedule: Every 2 hours (`rate(2 hours)`)
+- Target: `alliance-scheduled-cart-checker` Lambda
+
+The system is designed for high deliverability using Microsoft's email infrastructure and AI-powered personalization, providing enterprise-grade reliability with zero spam risk.
+
+## Current System Status (2025-07-30)
+
+**✅ DEPLOYED AND WORKING:**
+- `alliance-remarketing-graph` - Real-time webhook handler Lambda
+- `alliance-scheduled-cart-checker` - Scheduled cart recovery Lambda (every 30 minutes)
+- API Gateway endpoints for webhook processing
+- EventBridge rule for scheduled execution
+- PostgreSQL database with existing schema
+
+**❌ ISSUES TO FIX:**
+1. **Customer table schema mismatch** - `cust.first_name` column doesn't exist in database
+2. **Webhook handler 500 errors** - Internal server errors on API Gateway calls
+3. **Database query incompatibility** - Lambda queries don't match existing database schema
+4. **Missing test data** - No abandoned carts in database to test scheduled recovery
+
+**🔧 NEXT STEPS:**
+1. Check actual customer table schema: `\d alliance_remarketing_customers`
+2. Update scheduled-cart-checker.js queries to match existing column names
+3. Debug webhook handler by checking CloudWatch logs
+4. Add test data to database for end-to-end testing
+5. Verify Microsoft Graph email integration works
+6. Test Shopify discount code creation
+
+**📋 CHECKLIST TO COMPLETE SYSTEM:**
+- [ ] Fix customer table column references in scheduled cart checker
+- [ ] Debug and fix webhook handler 500 errors  
+- [ ] Test complete cart abandonment → email recovery flow
+- [ ] Verify EventBridge triggering every 30 minutes
+- [ ] Test AI email generation with OpenAI
+- [ ] Test Microsoft Graph email sending
+- [ ] Test Shopify discount code creation
+- [ ] Add monitoring and alerting for failed emails
+- [ ] Document final deployment and testing procedures
